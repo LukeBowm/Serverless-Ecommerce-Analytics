@@ -1,0 +1,61 @@
+{
+  "flowName": "EcommerceMarketingIntegration",
+  "description": "Flow to simulate data integration with a marketing platform",
+  "triggerConfig": {
+    "triggerType": "Scheduled",
+    "triggerProperties": {
+      "Scheduled": {
+        "scheduleExpression": "rate(1 hour)",
+        "dataPullMode": "Complete"
+      }
+    }
+  },
+  "sourceFlowConfig": {
+    "connectorType": "S3",
+    "sourceConnectorProperties": {
+      "S3": {
+        "bucketName": "lukebowm-appflow-data",
+        "bucketPrefix": "source-data/"
+      }
+    }
+  },
+  "destinationFlowConfigList": [{
+    "connectorType": "S3",
+    "destinationConnectorProperties": {
+      "S3": {
+        "bucketName": "lukebowm-appflow-data",
+        "bucketPrefix": "processed-data/",
+        "s3OutputFormatConfig": {
+          "fileType": "JSON",
+          "aggregationConfig": {
+            "aggregationType": "None"
+          },
+          "prefixConfig": {
+            "prefixType": "FILENAME",
+            "prefixFormat": "DAY"
+          }
+        }
+      }
+    }
+  }],
+  "tasks": [
+    {
+      "taskType": "Map",
+      "sourceFields": ["customer_id"],
+      "destinationField": "customer_segment",
+      "connectorOperator": {
+        "S3": "PROJECTION"
+      }
+    },
+    {
+      "taskType": "Filter",
+      "sourceFields": ["total_spent"],
+      "connectorOperator": {
+        "S3": "GREATER_THAN"
+      },
+      "taskProperties": {
+        "VALUE": "100"
+      }
+    }
+  ]
+}
