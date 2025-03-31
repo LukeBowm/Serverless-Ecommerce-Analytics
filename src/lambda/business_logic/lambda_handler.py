@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 from datetime import datetime, timedelta
+from decimal import Decimal  # Added import for Decimal
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
@@ -73,6 +74,9 @@ def update_time_based_metrics(table_name, time_unit, time_value, amount, detail)
     """Update metrics for a specific time unit (day, week, month)"""
     table = dynamodb.Table(table_name)
     
+    # Convert float to Decimal for DynamoDB compatibility
+    decimal_amount = Decimal(str(amount))
+    
     # Compute item counts and categories
     item_count = sum(item['quantity'] for item in detail['items'])
     categories = set(item.get('category', 'unknown') for item in detail['items'])
@@ -87,7 +91,7 @@ def update_time_based_metrics(table_name, time_unit, time_value, amount, detail)
                             "SET categories = list_append(if_not_exists(categories, :empty_list), :cats), " +
                             "last_updated = :now",
             ExpressionAttributeValues={
-                ':amount': amount,
+                ':amount': decimal_amount,  # Now using Decimal
                 ':items': item_count,
                 ':one': 1,
                 ':cats': list(categories),
@@ -112,7 +116,7 @@ def update_time_based_metrics(table_name, time_unit, time_value, amount, detail)
                 'metric_key': f"{time_unit}#{time_value}",
                 'time_unit': time_unit,
                 'time_value': time_value,
-                'total_sales': amount,
+                'total_sales': decimal_amount,  # Now using Decimal
                 'item_count': item_count,
                 'transaction_count': 1,
                 'categories': list(categories),
@@ -132,10 +136,10 @@ def update_customer_insights(detail):
     # Get cohort information
     cohort = detail.get('year_month_cohort', 'unknown')
     
-    # Get purchase information
-    total_spent = detail.get('total_spent', 0)
+    # Get purchase information and convert to Decimal
+    total_spent = Decimal(str(detail.get('total_spent', 0)))
     total_purchases = detail.get('total_purchases', 0)
-    avg_order_value = detail.get('average_order_value', 0)
+    avg_order_value = Decimal(str(detail.get('average_order_value', 0)))
     
     # Update cohort metrics
     table = dynamodb.Table(CUSTOMER_INSIGHTS_TABLE)
@@ -151,7 +155,7 @@ def update_customer_insights(detail):
                             "SET last_updated = :now",
             ExpressionAttributeValues={
                 ':one': 1,
-                ':amount': total_spent,
+                ':amount': total_spent,  # Already converted to Decimal
                 ':repeat': 1 if customer_type == 'repeat' else 0,
                 ':new': 1 if customer_type == 'new' else 0,
                 ':now': datetime.now().isoformat()
@@ -167,7 +171,7 @@ def update_customer_insights(detail):
                 'insight_type': 'cohort',
                 'cohort': cohort,
                 'customer_count': 1,
-                'total_revenue': total_spent,
+                'total_revenue': total_spent,  # Already converted to Decimal
                 'repeat_customers': 1 if customer_type == 'repeat' else 0,
                 'new_customers': 1 if customer_type == 'new' else 0,
                 'created_at': datetime.now().isoformat(),
@@ -206,6 +210,10 @@ def handle_inventory_alert(detail):
     try:
         # Create an alert record
         alert_id = f"alert_{product_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # Convert stock_level to Decimal if it might be a float
+        if isinstance(stock_level, float):
+            stock_level = Decimal(str(stock_level))
         
         table.put_item(
             Item={

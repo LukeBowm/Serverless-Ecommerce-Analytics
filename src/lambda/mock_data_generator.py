@@ -1,4 +1,3 @@
-# Lambda function for generating mock e-commerce data
 import json
 import random
 import uuid
@@ -25,8 +24,11 @@ def lambda_handler(event, context):
     total = sum(item["price"] * item["quantity"] for item in transaction["items"])
     transaction["total_amount"] = round(total, 2)
     
+    print(f"Generated transaction: {json.dumps(transaction)}")
+    
     # Publish transaction to SNS topic
     try:
+        print(f"Attempting to publish to SNS topic: {TOPIC_ARN}")
         response = sns.publish(
             TopicArn=TOPIC_ARN,
             Message=json.dumps(transaction),
@@ -39,8 +41,11 @@ def lambda_handler(event, context):
             }
         )
         print(f"Message published to SNS: {response['MessageId']}")
+        print(f"Full SNS response: {json.dumps(response)}")
     except Exception as e:
         print(f"Error publishing to SNS: {str(e)}")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error details: {str(e)}")
         raise e
     
     return {

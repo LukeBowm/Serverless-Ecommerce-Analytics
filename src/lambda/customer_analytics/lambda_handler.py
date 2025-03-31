@@ -2,14 +2,15 @@ import json
 import boto3
 import os
 from datetime import datetime
+from decimal import Decimal
 
 # Initialize EventBridge client
 events = boto3.client('events')
 EVENT_BUS_NAME = 'default'  # Use the default event bus or specify a custom one
 
-# Initialize DynamoDB client (for customer profiles)
+# Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
-CUSTOMER_TABLE_NAME = 'CustomerProfiles'  # We'll create this table later
+CUSTOMER_TABLE_NAME = 'CustomerProfiles'  # This table should already exist or be created by CloudFormation
 
 def lambda_handler(event, context):
     processed_count = 0
@@ -55,7 +56,7 @@ def analyze_customer(customer_id, transaction):
     customer_data = {
         "customer_id": customer_id,
         "last_purchase_date": transaction["timestamp"],
-        "last_purchase_amount": transaction["total_amount"],
+        "last_purchase_amount": Decimal(str(transaction["total_amount"])),
         "payment_method": transaction["payment_method"],
         "shipping_state": transaction["shipping_address"]["state"],
         "purchase_categories": list(set(item["category"] for item in transaction["items"])),
@@ -69,10 +70,10 @@ def analyze_customer(customer_id, transaction):
         if 'Item' in response:
             existing_customer = response['Item']
             
-            # Update analytics data
+            # Update analytics data - using Decimal for monetary values
             customer_data["total_purchases"] = existing_customer.get("total_purchases", 0) + 1
-            customer_data["total_spent"] = existing_customer.get("total_spent", 0) + transaction["total_amount"]
-            customer_data["average_order_value"] = customer_data["total_spent"] / customer_data["total_purchases"]
+            customer_data["total_spent"] = Decimal(str(existing_customer.get("total_spent", 0))) + Decimal(str(transaction["total_amount"]))
+            customer_data["average_order_value"] = Decimal(str(customer_data["total_spent"] / customer_data["total_purchases"]))
             
             # Calculate days since first purchase for customer lifetime
             first_purchase_date = existing_customer.get("first_purchase_date", transaction["timestamp"])
@@ -87,8 +88,8 @@ def analyze_customer(customer_id, transaction):
         else:
             # New customer
             customer_data["total_purchases"] = 1
-            customer_data["total_spent"] = transaction["total_amount"]
-            customer_data["average_order_value"] = transaction["total_amount"]
+            customer_data["total_spent"] = Decimal(str(transaction["total_amount"]))
+            customer_data["average_order_value"] = Decimal(str(transaction["total_amount"]))
             customer_data["first_purchase_date"] = transaction["timestamp"]
             customer_data["customer_type"] = "new"
     
@@ -96,8 +97,8 @@ def analyze_customer(customer_id, transaction):
         print(f"Error retrieving customer profile: {str(e)}")
         # Assume new customer if there's an error
         customer_data["total_purchases"] = 1
-        customer_data["total_spent"] = transaction["total_amount"]
-        customer_data["average_order_value"] = transaction["total_amount"]
+        customer_data["total_spent"] = Decimal(str(transaction["total_amount"]))
+        customer_data["average_order_value"] = Decimal(str(transaction["total_amount"]))
         customer_data["first_purchase_date"] = transaction["timestamp"]
         customer_data["customer_type"] = "new"
     
@@ -121,14 +122,23 @@ def update_customer_profile(customer_data):
 
 def send_to_eventbridge(data, detail_type):
     """Send data to EventBridge"""
+    # Convert Decimal to float for JSON serialization
+    json_data = json.loads(json.dumps(data, default=decimal_default))
+    
     response = events.put_events(
         Entries=[
             {
                 'Source': 'com.ecommerce.customers',
                 'DetailType': detail_type,
-                'Detail': json.dumps(data),
+                'Detail': json.dumps(json_data),
                 'EventBusName': EVENT_BUS_NAME
             }
         ]
     )
     return response
+
+def decimal_default(obj):
+    """Helper function to convert Decimal to float for JSON serialization"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError("Object of type '%s' is not JSON serializable" % type(obj).__name__)

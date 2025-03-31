@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 from datetime import datetime
+from decimal import Decimal
 
 # Initialize EventBridge client
 events = boto3.client('events')
@@ -9,7 +10,7 @@ EVENT_BUS_NAME = 'default'
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
-INVENTORY_TABLE_NAME = 'InventoryStatus'  # We'll create this table later
+INVENTORY_TABLE_NAME = 'InventoryStatus'
 
 def lambda_handler(event, context):
     processed_count = 0
@@ -73,15 +74,15 @@ def update_inventory(item):
             # Check if stock is low (less than 20% of initial stock)
             stock_status = 'low' if new_stock < 20 else 'normal'
             
-            # Update inventory record
+            # Update inventory record - using Decimal for numeric values
             inventory_data = {
                 'product_id': product_id,
                 'product_name': item["product_name"],
                 'category': item.get("category", "unknown"),
-                'stock_level': new_stock,
+                'stock_level': Decimal(str(new_stock)),
                 'inventory_status': stock_status,
                 'last_updated': datetime.now().isoformat(),
-                'units_sold_total': current_inventory.get('units_sold_total', 0) + quantity_sold
+                'units_sold_total': Decimal(str(current_inventory.get('units_sold_total', 0) + quantity_sold))
             }
             
             # Save to DynamoDB
@@ -98,11 +99,11 @@ def update_inventory(item):
                 'product_id': product_id,
                 'product_name': item["product_name"],
                 'category': item.get("category", "unknown"),
-                'stock_level': new_stock,
+                'stock_level': Decimal(str(new_stock)),
                 'inventory_status': stock_status,
-                'initial_stock': initial_stock,
+                'initial_stock': Decimal(str(initial_stock)),
                 'last_updated': datetime.now().isoformat(),
-                'units_sold_total': quantity_sold
+                'units_sold_total': Decimal(str(quantity_sold))
             }
             
             # Save to DynamoDB
@@ -116,14 +117,23 @@ def update_inventory(item):
 
 def send_to_eventbridge(data, detail_type):
     """Send data to EventBridge"""
+    # Convert Decimal to float for JSON serialization
+    json_data = json.loads(json.dumps(data, default=decimal_default))
+    
     response = events.put_events(
         Entries=[
             {
                 'Source': 'com.ecommerce.inventory',
                 'DetailType': detail_type,
-                'Detail': json.dumps(data),
+                'Detail': json.dumps(json_data),
                 'EventBusName': EVENT_BUS_NAME
             }
         ]
     )
     return response
+
+def decimal_default(obj):
+    """Helper function to convert Decimal to float for JSON serialization"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError("Object of type '%s' is not JSON serializable" % type(obj).__name__)
